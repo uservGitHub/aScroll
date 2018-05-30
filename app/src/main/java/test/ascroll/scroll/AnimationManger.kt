@@ -4,13 +4,17 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Paint
+import android.graphics.*
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.OverScroller
 import android.widget.RelativeLayout
 import org.jetbrains.anko.AnkoLogger
+import org.jetbrains.anko.dip
 import org.jetbrains.anko.info
+import org.jetbrains.anko.sp
 
 /**
  *
@@ -162,18 +166,28 @@ class AnimationManger(private val pdfView: PdfView):AnkoLogger{
 }
 class PdfView(ctx:Context):RelativeLayout(ctx){
     private var animationManger: AnimationManger? = null
+    private var dragPinchManager:DragPinchManager? = null
     private lateinit var debugPaint: Paint
+    private lateinit var debugTextPaint: Paint
     private var state = State.NONE
     private var hasSize = false
     init {
         if(!isInEditMode) {
-
             animationManger = AnimationManger(this)
+            dragPinchManager = DragPinchManager(this, animationManger!!).apply {
+                enable()
+            }
             setWillNotDraw(false)
             //debug
             debugPaint = Paint().apply {
                 style = Paint.Style.STROKE
+                color = Color.RED
             }
+            debugTextPaint = Paint().apply {
+                textSize = sp(80).toFloat()
+                color = Color.GREEN
+            }
+            state = State.SHOW
         }
     }
     fun moveTo(x:Float, y:Float){
@@ -190,6 +204,16 @@ class PdfView(ctx:Context):RelativeLayout(ctx){
         private set
     var visY:Float = 0F
         private set
+    var visMaxX:Float = 0F
+        private set
+    var visMaxY:Float = 0F
+        private set
+    var visMinX:Float = 0F
+        private set
+    var visMinY:Float = 0F
+        private set
+    var isSwipeVertical:Boolean = true
+        private set
     fun tryLoadOnePage(){}
     fun tryLoadPages(){}
 
@@ -203,11 +227,15 @@ class PdfView(ctx:Context):RelativeLayout(ctx){
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         hasSize = true
-        if (isInEditMode || state != State.SHOW){
+        if (isInEditMode || state != State.SHOW) {
             return
         }
-
         animationManger?.stopAll()
+        val margin = dip(10).toFloat()
+        visMinX = margin
+        visMinY = margin
+        visMaxX = width.toFloat() - 2 * margin
+        visMaxY = height.toFloat() - 2 * margin
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -215,7 +243,8 @@ class PdfView(ctx:Context):RelativeLayout(ctx){
             return
         }
 
-        canvas.drawText("${visX.toInt()} , ${visY.toInt()}",(width/4).toFloat(),(height/2).toFloat(),debugPaint)
+        canvas.drawText("${visX.toInt()} , ${visY.toInt()}",(width/4).toFloat(),(height/2).toFloat(),debugTextPaint)
+        canvas.drawRect(RectF(visMinX,visMinY,visMaxX,visMaxY), debugPaint)
     }
 
     class State{
@@ -223,5 +252,85 @@ class PdfView(ctx:Context):RelativeLayout(ctx){
             val NONE = 0
             val SHOW = 1
         }
+    }
+}
+
+class DragPinchManager(private val pdfView: PdfView, private val animationManger: AnimationManger):
+    GestureDetector.OnGestureListener, View.OnTouchListener,GestureDetector.OnDoubleTapListener{
+
+    private val gestureDetector:GestureDetector
+    private var scrolling = false
+    private var enabled = false
+    init {
+        gestureDetector = GestureDetector(pdfView.context, this)
+        pdfView.setOnTouchListener(this)
+    }
+    fun enable(){
+        enabled = true
+    }
+    fun disable(){
+        enabled = false
+    }
+
+    override fun onSingleTapConfirmed(e: MotionEvent?): Boolean {
+        //内部控件的单击处理，比如ScrollHandled的处理
+        //...
+        pdfView.performClick()
+        return true
+    }
+
+    override fun onDoubleTap(e: MotionEvent?): Boolean {
+        //可以进行放大等双击操作
+        //...
+        return true
+    }
+
+    override fun onLongPress(e: MotionEvent?) = Unit
+    override fun onSingleTapUp(e: MotionEvent?) = false
+    override fun onDoubleTapEvent(e: MotionEvent?) = false
+    override fun onShowPress(e: MotionEvent?) = Unit
+    override fun onDown(e: MotionEvent?): Boolean {
+        animationManger.stopMoving()
+        return true
+    }
+
+    override fun onScroll(e1: MotionEvent?, e2: MotionEvent?, distanceX: Float, distanceY: Float): Boolean {
+        scrolling = true
+        //能移动吗？
+        pdfView.moveOffset(-distanceX, -distanceY)
+        pdfView.tryLoadOnePage()
+        return true
+    }
+
+    override fun onFling(e1: MotionEvent?, e2: MotionEvent?, velocityX: Float, velocityY: Float): Boolean {
+        if (pdfView.isSwipeVertical){
+            animationManger.startFlingAnimation(pdfView.visX.toInt(),pdfView.visY.toInt(),
+                    0,velocityY.toInt(),
+                    pdfView.visMinX.toInt(),pdfView.visMaxX.toInt(),
+                    -pdfView.visMaxY.toInt(),2*pdfView.visMaxY.toInt())
+        }
+        return true
+    }
+
+    override fun onTouch(v: View, event: MotionEvent): Boolean {
+        if (!enabled){
+            return false
+        }
+        val retVal = gestureDetector.onTouchEvent(event)
+
+        if (event.action == MotionEvent.ACTION_UP){
+            if (scrolling){
+                scrolling = false
+                onScrollEnd(event)
+            }
+        }
+        return retVal
+    }
+    private fun onScrollEnd(event: MotionEvent){
+        pdfView.tryLoadPages()
+        //是否回弹
+        animationManger.startSpringBack(pdfView.visX.toInt(),pdfView.visY.toInt(),
+                pdfView.visMinX.toInt(),pdfView.visMaxX.toInt(),
+                pdfView.visMinY.toInt(), pdfView.visMaxY.toInt())
     }
 }
