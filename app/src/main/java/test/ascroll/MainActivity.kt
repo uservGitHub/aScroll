@@ -6,6 +6,9 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.TextView
 import org.jetbrains.anko.ctx
+import test.ascroll.scroll.OverScrollTextView
+import test.ascroll.scroll.OverScrollView
+import test.ascroll.scroll.OverScrollViewManager
 import test.ascroll.scroll.PdfView
 
 class MainActivity : AppCompatActivity() {
@@ -16,9 +19,8 @@ class MainActivity : AppCompatActivity() {
             text = "这是文本"
             gravity = Gravity.CENTER
         })*/
-        setContentView(PdfView(ctx).apply {
-
-        },
+        setContentView(
+                OverScrollViewManager(ctx),
                 ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT))
