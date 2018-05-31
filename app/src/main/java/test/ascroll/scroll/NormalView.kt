@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
 import android.text.InputType
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -26,162 +27,19 @@ val VIEW_TAG = "_View"
  * 如果父View在onInterceptTouchEvent中拦截了事件，则onInterceptTouchEvent不会收到Touch事件，
  * 因为事件直接交由它自己处理（普通View的处理方式）
  */
-class OverScrollViewManager(ctx:Context): View(ctx),AnkoLogger{
-    override val loggerTag: String
-        get() = VIEW_TAG
-    private var touchGroupIndex = 0
-    private var touchSate = "None"
-        set(value) {
-            if (value != field) {
-                field = value
-                postInvalidate()
-            }
-        }
-    var visX:Float = 0F
-        private set
-    var visY:Float = 0F
-        private set
-    fun moveOffset(dx:Float, dy:Float){
-        visX += dx
-        visY += dy
-        invalidate()
-    }
-    fun moveTo(x:Float, y:Float){
-        visX = x
-        visY = y
-        invalidate()
-    }
-    //按下时的值（可以是可视坐标x,y 也可以是屏幕坐标rawX,rawY）
-    private var downX:Float = 0F
-    private var downY:Float = 0F
-    //上次移动后的值（同down同类型）
-    private var lastMoveX:Float = 0F
-    private var lastMoveY:Float = 0F
-    private val mScroller:OverScroller
-    private var tickFling: Long = 0
-    private var countFling: Int = 0
-    private var numFling: Int = 0
-    private var flagFling:Boolean = false
-    private val FONTSIZE = 26
-    private val paint:Paint
-    init {
-        mScroller = OverScroller(ctx)
-        paint = Paint().apply {
-            textSize = sp(FONTSIZE).toFloat()
-            color = Color.BLACK
-            style = Paint.Style.FILL
-            textAlign = Paint.Align.CENTER
-        }
-        /*setOnLongClickListener {
-            info { "LongClick" }
-            return@setOnLongClickListener true
-        }
-        setOnClickListener {
-            info { "Click" }
-        }*/
-    }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                if (flagFling){
-                    stopFling()
-                }
-                //用屏幕坐标
-                lastMoveX = event.rawX
-                lastMoveY = event.rawY
-
-                touchGroupIndex++
-                info { "PreDown" }
-                touchSate = "_DOWN"
-                //TextView默认不消费该事件，需要设置
-                //这里消费了，下面的自动消费，它们是一组
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val dx = event.rawX - lastMoveX
-                var dy = event.rawY - lastMoveY
-                moveOffset(dx, dy)
-                lastMoveX = event.rawX
-                lastMoveY = event.rawY
-
-                touchSate = "_MOVE"
-            }
-            MotionEvent.ACTION_UP -> {
-                //touchSate = "_UP"
-                info { "PostUp" }
-                info { "fling(500,2500,0,5000)" }
-                //如果不过界，由速率决定最终置，因为时间是一定的
-                //速率越大，持续时间越长
-                //overX 到最大值后，会回弹到minX值
-                flagFling = true
-                mScroller.fling(500,500,2500,0,
-                        0,1000, 0, 1000,250,0)
-                countFling = 0
-                numFling = 500
-                tickFling = System.currentTimeMillis()
-                //启动fling
-                invalidate()
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        //info { "Draw" }
-        val dh = sp(FONTSIZE+4).toFloat()
-        val cx = width.toFloat() / 2
-
-        val visPt = "(x,y) = ${visX.toInt()},${visY.toInt()}"
-        val visRect = "(curX,curY,isFinish) = ${mScroller.currX},${mScroller.currY},${mScroller.isFinished}"
-        val touchEvent = "$touchGroupIndex$touchSate"
-        val strs = listOf<String>(touchEvent,visRect,visPt)
-        var vcy = (height.toFloat() - dh * strs.size) / 2
-
-        strs.forEach {
-            canvas.drawText(it, cx, vcy, paint)
-            vcy += dh
-        }
-        //_MOVE事件移动至View的外面时，仍然有效；移动至Activity之外_UP事件才触发
-    }
-
-    override fun computeScroll() {
-        //info { "computeScroll:(${mScroller.isFinished},${mScroller.currX},${mScroller.currY})" }
-        super.computeScroll()
-        if (mScroller.computeScrollOffset()){
-            //中间值
-            countFling++
-            invalidate()
-        }else if (flagFling){
-            //最后一个值
-            flagFling = false
-            var curTick = System.currentTimeMillis()
-            info { "$numFling - ${mScroller.finalX} (${mScroller.currX}), timespan: ${curTick- tickFling} ms, count: $countFling" }
-        }
-    }
-    fun stopFling(completed: Boolean = false){
-        //flagFling = false
-        if (completed){
-            mScroller.abortAnimation()
-            postInvalidate()
-        }else{
-            mScroller.forceFinished(true)
-            invalidate()
-        }
-    }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        info { "SizeChanged" }
-    }
-}
 
 //region    ViewCallback ViewAnimationManager
 interface ViewCallback{
     val visX:Float
     val visY:Float
     val view:View
+    val isSwipeVertical:Boolean
     fun moveTo(x:Float, y:Float)
     fun moveOffset(dx:Float, dy:Float)
+    //动画不还原，加速可以还原
+    var hasMove:Boolean
+
 }
 
 class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
@@ -207,6 +65,7 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
             val xAnimation = XAnimation()
             addUpdateListener(xAnimation)
             addListener(xAnimation)
+            host.hasMove = true
             start()
         }
     }
@@ -221,6 +80,7 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
             val yAnimation = YAnimation()
             addUpdateListener(yAnimation)
             addListener(yAnimation)
+            host.hasMove = true
             start()
         }
     }
@@ -231,6 +91,7 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
         stopAll()
         fling = true
         timeSpan = System.currentTimeMillis()
+        host.hasMove = true
         scroller.fling(startX, startY, velX, velY, minX, maxX, minY, maxY)
     }
     //endregion
@@ -243,14 +104,15 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
     }
 
     fun stopFiling(toFinal: Boolean = false) {
-        fling = false
-        info { "stopFling" }
-        if (toFinal) {
-            scroller.abortAnimation()
-            host.view.postInvalidate()
-        } else {
-            scroller.forceFinished(true)
-            host.view.invalidate()
+        if (fling) {
+            info { "stopFling" }
+            if (toFinal) {
+                scroller.abortAnimation()
+                host.view.postInvalidate()
+            } else {
+                scroller.forceFinished(true)
+                host.view.invalidate()
+            }
         }
     }
     //endregion
@@ -261,11 +123,10 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
         } else if (fling) {
             fling = false
             host.moveTo(scroller.currX.toFloat(), scroller.currY.toFloat())
-            val sp = timeSpan.takeIf { it != 0L }.apply {
-                "(${System.currentTimeMillis()-this!!})ms"
-            } ?: ""
+            val sp = "(${System.currentTimeMillis()-timeSpan})ms"
             info { "EndFling$sp(${scroller.currX} - ${scroller.finalX}),(${scroller.currY} - ${scroller.finalY})" }
             timeSpan = 0
+            host.hasMove = false
         }
     }
 
@@ -320,18 +181,110 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
 }
 //endregion
 
+//region    ViewDragPinchManager
+
+class ViewDragPinchManager(private val host: ViewCallback, private val animationManger: ViewAnimationManger):
+        GestureDetector.OnGestureListener, View.OnTouchListener,GestureDetector.OnDoubleTapListener,AnkoLogger{
+    override val loggerTag: String
+        get() = VIEW_TAG
+    private val gestureDetector:GestureDetector
+    private var scrolling = false
+    private var enabled = false
+    init {
+        gestureDetector = GestureDetector(host.view.context, this)
+        host.view.setOnTouchListener(this)
+    }
+    fun enable(){
+        enabled = true
+    }
+    fun disable(){
+        enabled = false
+    }
+    override fun onSingleTapConfirmed(e: MotionEvent?): Boolean {
+        //内部控件的单击处理，比如ScrollHandled的处理
+        //...
+        info { "hostPreClick" }
+        host.view.performClick()
+        return true
+    }
+
+    override fun onDoubleTap(e: MotionEvent?): Boolean {
+        //可以进行放大等双击操作
+        //...
+        info { "hostDbClick" }
+        return true
+    }
+
+    override fun onLongPress(e: MotionEvent?) = Unit
+    override fun onSingleTapUp(e: MotionEvent?) = false
+    override fun onDoubleTapEvent(e: MotionEvent?) = false
+    override fun onShowPress(e: MotionEvent?) = Unit
+    override fun onDown(e: MotionEvent?): Boolean {
+        info { "Down" }
+        animationManger.stopAll()
+        return true
+    }
+
+    override fun onScroll(e1: MotionEvent?, e2: MotionEvent?, distanceX: Float, distanceY: Float): Boolean {
+        if (!scrolling){
+            info { "BeginScroll" }
+            scrolling = true
+        }
+        host.moveOffset(-distanceX, -distanceY)
+        return true
+    }
+
+    override fun onFling(e1: MotionEvent?, e2: MotionEvent?, velocityX: Float, velocityY: Float): Boolean {
+        if (host.isSwipeVertical){
+            animationManger.startFlingAnimation(host.visX.toInt(),host.visY.toInt(),
+                    0,velocityY.toInt(),
+                    0,0,
+                    -host.view.height,host.view.height)
+        }
+        return true
+    }
+
+    override fun onTouch(v: View, event: MotionEvent): Boolean {
+        if (!enabled){
+            return false
+        }
+        val retVal = gestureDetector.onTouchEvent(event)
+
+        if (event.action == MotionEvent.ACTION_UP){
+            if (scrolling){
+                scrolling = false
+                onScrollEnd(event)
+            }
+        }
+        return retVal
+    }
+    private fun onScrollEnd(event: MotionEvent){
+        info { "EndScroll" }
+        //pdfView.tryLoadPages()
+        //是否回弹
+        //host.hasMove = false
+    }
+}
+
+//endregion
+
 class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
     override val loggerTag: String
         get() = VIEW_TAG
     private val animationManager:ViewAnimationManger
+    private val dragPinchManager:ViewDragPinchManager
     private val textPaint: Paint
     private val fontSize = 26
     private val state = State.DEFAULT
     private val drawTextLines:MutableList<String>
 
     private var hasSize = false
+
     init {
         animationManager = ViewAnimationManger(this)
+        dragPinchManager = ViewDragPinchManager(this, animationManager).apply {
+            enable()
+        }
         textPaint = Paint().apply {
             textSize = sp(fontSize).toFloat()
             color = Color.BLACK
@@ -343,12 +296,12 @@ class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
     }
 
     private fun loadConfig(){
-        drawTextLines.add("$visX")
+        drawTextLines.add("""pt (${visX.toInt()},${visY.toInt()})""")
     }
 
     //region    override
     override fun onDraw(canvas: Canvas) {
-        if(isInEditMode){
+        if (isInEditMode) {
             return
         }
         //region    draw background
@@ -357,11 +310,28 @@ class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
             isDrawBackground = true
             it.draw(canvas)
         }
-        if (!isDrawBackground){
+        if (!isDrawBackground) {
             canvas.drawColor(Color.WHITE)
         }
         //endregion
 
+        //region    textlines
+        val dh = sp(fontSize + 4).toFloat()
+        val cx = width.toFloat() / 2
+        val list = listOf<String>("pt (${visX.toInt()},${visY.toInt()})")
+        var vcy = (height.toFloat() - dh * list.size) / 2
+
+        list.forEach {
+            /*if (hasMove) {
+                canvas.drawText(it, cx, vcy, textPaint)
+            } else {
+                canvas.drawText(it, cx + visX, vcy + visY, textPaint)
+            }*/
+            canvas.drawText(it, cx, vcy, textPaint)
+            canvas.drawText(it, cx + visX, vcy + visY, textPaint)
+            vcy += dh
+        }
+        //endregion
     }
 
     override fun computeScroll() {
@@ -384,7 +354,22 @@ class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
 
     private enum class State {DEFAULT, LOADED, SHOWN, ERROR}
 
-    //region    ViewCallback
+    override var isSwipeVertical: Boolean = true
+        private set
+    override var hasMove: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!value) {
+                    //1.5秒后还原位置
+                    postDelayed({
+                        invalidate()
+                        visX = 0F
+                        visY = 0F
+                    }, 1500)
+                }
+            }
+        }
     override val view: View
         get() = this
     override var visX: Float = 0F

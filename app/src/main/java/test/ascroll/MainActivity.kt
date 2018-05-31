@@ -6,10 +6,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.TextView
 import org.jetbrains.anko.ctx
-import test.ascroll.scroll.OverScrollTextView
-import test.ascroll.scroll.OverScrollView
-import test.ascroll.scroll.OverScrollViewManager
-import test.ascroll.scroll.PdfView
+import test.ascroll.scroll.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -20,7 +17,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
         })*/
         setContentView(
-                OverScrollViewManager(ctx),
+                NormalView(ctx),
                 ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT))
