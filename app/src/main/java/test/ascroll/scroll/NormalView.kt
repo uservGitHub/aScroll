@@ -33,13 +33,12 @@ val VIEW_TAG = "_View"
 interface ViewCallback{
     val visX:Float
     val visY:Float
+    val visBoundX:Float
+    val visBoundY:Float
     val view:View
     val isSwipeVertical:Boolean
     fun moveTo(x:Float, y:Float)
     fun moveOffset(dx:Float, dy:Float)
-    //动画不还原，加速可以还原
-    var hasMove:Boolean
-
 }
 
 class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
@@ -48,39 +47,46 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
     private val scroller: OverScroller
     private var animation: ValueAnimator? = null
     private var fling = false
-    private var timeSpan:Long = 0
+    private var beginFlingTick:Long = 0
+    private var beginAnimationTick:Long = 0
+    private var skipToEnd:Boolean = false
+    private var endValue:Float = 0F
 
     init {
         scroller = OverScroller(host.view.context)
     }
 
     //region startXAnimation startYAnimation startFlingAnimation
-    fun startXAnimation(xFrom: Float, xTo: Float) {
+    fun startXAnimation(xFrom: Float, xTo: Float, toEnd:Boolean = false) {
         info { "startXAnimation(${xFrom.toInt()},${xTo.toInt()})" }
         stopAll()
-        timeSpan = System.currentTimeMillis()
+        skipToEnd = toEnd
+        endValue = xTo
+        beginAnimationTick = System.currentTimeMillis()
         animation = ValueAnimator.ofFloat(xFrom, xTo).apply {
             interpolator = DecelerateInterpolator()
             duration = 400
             val xAnimation = XAnimation()
             addUpdateListener(xAnimation)
             addListener(xAnimation)
-            host.hasMove = true
+
             start()
         }
     }
 
-    fun startYAnimation(yFrom: Float, yTo: Float) {
+    fun startYAnimation(yFrom: Float, yTo: Float, toEnd:Boolean = false) {
         info { "startYAnimation(${yFrom.toInt()},${yTo.toInt()})" }
         stopAll()
-        timeSpan = System.currentTimeMillis()
+        skipToEnd = toEnd
+        endValue = yTo
+        beginAnimationTick = System.currentTimeMillis()
         animation = ValueAnimator.ofFloat(yFrom, yTo).apply {
             interpolator = DecelerateInterpolator()
             duration = 400
             val yAnimation = YAnimation()
             addUpdateListener(yAnimation)
             addListener(yAnimation)
-            host.hasMove = true
+
             start()
         }
     }
@@ -89,9 +95,8 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
                             minX: Int, maxX: Int, minY: Int, maxY: Int) {
         info { "startFlingAnimation($startX,$velX,$minX - $maxX),($startY,$velY,$minY - $maxY)" }
         stopAll()
+        beginFlingTick = System.currentTimeMillis()
         fling = true
-        timeSpan = System.currentTimeMillis()
-        host.hasMove = true
         scroller.fling(startX, startY, velX, velY, minX, maxX, minY, maxY)
     }
     //endregion
@@ -103,6 +108,9 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
         stopFiling()
     }
 
+    /**
+     * 停止加速（是否要到结束点）
+     */
     fun stopFiling(toFinal: Boolean = false) {
         if (fling) {
             info { "stopFling" }
@@ -123,10 +131,8 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
         } else if (fling) {
             fling = false
             host.moveTo(scroller.currX.toFloat(), scroller.currY.toFloat())
-            val sp = "(${System.currentTimeMillis()-timeSpan})ms"
+            val sp = "(${System.currentTimeMillis()-beginFlingTick})ms"
             info { "EndFling$sp(${scroller.currX} - ${scroller.finalX}),(${scroller.currY} - ${scroller.finalY})" }
-            timeSpan = 0
-            host.hasMove = false
         }
     }
 
@@ -138,19 +144,14 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
         }
 
         override fun onAnimationCancel(animation: Animator?) {
-            if (animation is ValueAnimator){
-                val value = animation.animatedValue as Float
-                info { "CancelX(${System.currentTimeMillis()-timeSpan})ms(${value.toInt()})" }
-                timeSpan = 0
+            if (skipToEnd){
+                host.moveTo(endValue, host.visY)
             }
+            info { "CancelX(${System.currentTimeMillis()-beginAnimationTick})ms" }
         }
 
         override fun onAnimationEnd(animation: Animator?) {
-            if (animation is ValueAnimator){
-                val value = animation.animatedValue as Float
-                info { "EndX(${System.currentTimeMillis()-timeSpan})ms(${value.toInt()})" }
-                timeSpan = 0
-            }
+            info { "EndX(${System.currentTimeMillis()-beginAnimationTick})ms(${host.visX}=$endValue)" }
         }
     }
 
@@ -161,19 +162,14 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
         }
 
         override fun onAnimationCancel(animation: Animator?) {
-            if (animation is ValueAnimator){
-                val value = animation.animatedValue as Float
-                info { "CancelY(${System.currentTimeMillis()-timeSpan})ms(${value.toInt()})" }
-                timeSpan = 0
+            if (skipToEnd){
+                host.moveTo(host.visX, endValue)
             }
+            info { "CancelY(${System.currentTimeMillis()-beginAnimationTick})ms($endValue)" }
         }
 
         override fun onAnimationEnd(animation: Animator?) {
-            if (animation is ValueAnimator){
-                val value = animation.animatedValue as Float
-                info { "EndY(${System.currentTimeMillis()-timeSpan})ms(${value.toInt()})" }
-                timeSpan = 0
-            }
+            info { "EndY(${System.currentTimeMillis()-beginAnimationTick})ms(${host.visY}=${endValue})" }
         }
     }
 
@@ -190,6 +186,8 @@ class ViewDragPinchManager(private val host: ViewCallback, private val animation
     private val gestureDetector:GestureDetector
     private var scrolling = false
     private var enabled = false
+    private var dbClickTick: Long = 0
+
     init {
         gestureDetector = GestureDetector(host.view.context, this)
         host.view.setOnTouchListener(this)
@@ -208,10 +206,20 @@ class ViewDragPinchManager(private val host: ViewCallback, private val animation
         return true
     }
 
-    override fun onDoubleTap(e: MotionEvent?): Boolean {
+    //DoubleClick后面为什么要触发一个Down操作呢？
+    override fun onDoubleTap(e: MotionEvent): Boolean {
         //可以进行放大等双击操作
-        //...
+        dbClickTick = System.currentTimeMillis()
         info { "hostDbClick" }
+        if (host.isSwipeVertical){
+            if (host.visBoundY != host.visY){
+                animationManger.startYAnimation(host.visY, host.visBoundY, true)
+            }
+        }else{
+            if (host.visBoundX != host.visX){
+                animationManger.startXAnimation(host.visX, host.visBoundX, true)
+            }
+        }
         return true
     }
 
@@ -220,8 +228,12 @@ class ViewDragPinchManager(private val host: ViewCallback, private val animation
     override fun onDoubleTapEvent(e: MotionEvent?) = false
     override fun onShowPress(e: MotionEvent?) = Unit
     override fun onDown(e: MotionEvent?): Boolean {
-        info { "Down" }
-        animationManger.stopAll()
+        val tick = System.currentTimeMillis()
+        //防止DbClick后面紧跟着执行stopAll操作
+        if (tick - dbClickTick > 50) {
+            info { "Down-StopAll" }
+            animationManger.stopAll()
+        }
         return true
     }
 
@@ -235,11 +247,27 @@ class ViewDragPinchManager(private val host: ViewCallback, private val animation
     }
 
     override fun onFling(e1: MotionEvent?, e2: MotionEvent?, velocityX: Float, velocityY: Float): Boolean {
-        if (host.isSwipeVertical){
-            animationManger.startFlingAnimation(host.visX.toInt(),host.visY.toInt(),
-                    0,velocityY.toInt(),
-                    0,0,
-                    -host.view.height,host.view.height)
+        if (host.isSwipeVertical) {
+            val maxVelY = host.view.height * 1
+            val velY = if (velocityY > maxVelY) maxVelY else velocityY.toInt()
+            val y = host.visY.toInt()
+            val minY = y - 8000
+            val maxY = y + 8000
+            animationManger.startFlingAnimation(host.visX.toInt(), y,
+                    0, velY,
+                    0, 0,
+                    minY, maxY)
+        } else {
+            val maxVelX = host.view.width * 1
+            val velX = if (velocityX > maxVelX) maxVelX else velocityX.toInt()
+            val x = host.visX.toInt()
+            //模拟无限
+            val minX = x - 8000
+            val maxX = x + 8000
+            animationManger.startFlingAnimation(x, host.visY.toInt(),
+                    velX, 0,
+                    minX, maxX,
+                    0, 0)
         }
         return true
     }
@@ -260,9 +288,16 @@ class ViewDragPinchManager(private val host: ViewCallback, private val animation
     }
     private fun onScrollEnd(event: MotionEvent){
         info { "EndScroll" }
-        //pdfView.tryLoadPages()
-        //是否回弹
-        //host.hasMove = false
+        //回弹不能移动的边
+        if (host.isSwipeVertical){
+            if (host.visBoundX != host.visX){
+                animationManger.startXAnimation(host.visX, host.visBoundX, true)
+            }
+        }else{
+            if (host.visBoundY != host.visY){
+                animationManger.startYAnimation(host.visY, host.visBoundY, true)
+            }
+        }
     }
 }
 
@@ -285,6 +320,7 @@ class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
         dragPinchManager = ViewDragPinchManager(this, animationManager).apply {
             enable()
         }
+
         textPaint = Paint().apply {
             textSize = sp(fontSize).toFloat()
             color = Color.BLACK
@@ -348,34 +384,27 @@ class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
         if (isInEditMode || state != State.SHOWN){
             return
         }
+        info { "hasSize($w,$h)" }
         animationManager.stopAll()
     }
     //endregion
 
     private enum class State {DEFAULT, LOADED, SHOWN, ERROR}
 
+    //region ViewCallback
     override var isSwipeVertical: Boolean = true
         private set
-    override var hasMove: Boolean = false
-        set(value) {
-            if (field != value) {
-                field = value
-                if (!value) {
-                    //1.5秒后还原位置
-                    postDelayed({
-                        invalidate()
-                        visX = 0F
-                        visY = 0F
-                    }, 1500)
-                }
-            }
-        }
     override val view: View
         get() = this
     override var visX: Float = 0F
         private set
     override var visY: Float = 0F
         private set
+    override var visBoundX: Float = 0F
+        private set
+    override var visBoundY: Float = 0F
+        private set
+
 
     override fun moveTo(x: Float, y: Float) {
         visX = x
