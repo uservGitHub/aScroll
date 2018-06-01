@@ -242,7 +242,13 @@ class ViewDragPinchManager(private val host: ViewCallback, private val animation
             info { "BeginScroll" }
             scrolling = true
         }
-        host.moveOffset(-distanceX, -distanceY)
+        if (host.isSwipeVertical){
+            if (Math.abs(distanceX)>Math.abs(distanceY)*1.5F){
+                host.moveOffset(-distanceX, 0F)
+            }else{
+                host.moveOffset(0F, -distanceY)
+            }
+        }
         return true
     }
 
