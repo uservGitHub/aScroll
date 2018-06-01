@@ -16,8 +16,13 @@ import android.widget.TextView
 import org.jetbrains.anko.AnkoLogger
 import org.jetbrains.anko.info
 import org.jetbrains.anko.sp
+import java.util.*
 
 val VIEW_TAG = "_View"
+val randColor:Int get() {
+    val r = Random()
+    return Color.rgb(r.nextInt(256), r.nextInt(256), r.nextInt(256))
+}
 /**
  * http://www.jb51.net/article/31797.htm
  * Touch 事件分层：Activity, ViewGroup, View
@@ -423,5 +428,48 @@ class NormalView(ctx: Context):View(ctx),ViewCallback,AnkoLogger{
         visY += dy
         invalidate()
     }
+    //endregion
+
+    //region    innerClass
+    inner class VisRect(
+            var width:Float,
+            var height:Float,
+            var clipX:Float,
+            var clipY:Float,
+            var testColor:Int = randColor
+    ){
+        var worldX:Float = 0F
+        var worldY:Float = 0F
+        var zIndex = 0
+        var flagHiting = false  //点击命中
+        var flagWorldMoving = false //世界坐标系可移动
+        var flagClipMoving = false //视区起点可移动
+        val clipRect:RectF get() = RectF(clipX,clipY,clipX+width,clipY+height)
+
+        fun look(canvas: Canvas, f: (Canvas) -> Unit) {
+            canvas.save()
+            canvas.clipRect(clipRect)   //指定区域
+            if (flagHiting){
+                canvas.drawColor(Color.LTGRAY)
+            }
+            //look的位置
+            canvas.translate(-worldX, -worldY)
+            //draw world
+            f.invoke(canvas)
+            canvas.restore()
+        }
+        fun moveWorldOffset(dx:Float, dy: Float){
+            worldX += dx
+            worldY += dy
+        }
+        fun moveClipOffset(dx: Float, dy: Float){
+            //要求内容world也要随之移动
+            clipX += dx
+            clipY += dy
+            moveWorldOffset(-dx, -dy)
+        }
+    }
+
+
     //endregion
 }
