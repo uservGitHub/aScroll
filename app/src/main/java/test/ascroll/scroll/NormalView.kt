@@ -51,7 +51,7 @@ interface ViewCallback{
     fun hiting(e:MotionEvent)
 }
 
-class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
+class ViewAnimationManger(private val host:NormalView):AnkoLogger {
     override val loggerTag: String
         get() = VIEW_TAG
     private val scroller: OverScroller
@@ -189,7 +189,7 @@ class ViewAnimationManger(private val host:ViewCallback):AnkoLogger {
 
 //region    ViewDragPinchManager
 
-class ViewDragPinchManager(private val host: ViewCallback, private val animationManger: ViewAnimationManger):
+class ViewDragPinchManager(private val host: NormalView, private val animationManger: ViewAnimationManger):
         GestureDetector.OnGestureListener, View.OnTouchListener,GestureDetector.OnDoubleTapListener,AnkoLogger{
     override val loggerTag: String
         get() = VIEW_TAG
@@ -354,6 +354,7 @@ class NormalView(ctx: Context):RelativeLayout(ctx),ViewCallback,AnkoLogger {
     internal var splitLine: SplitScreen? = null
     private val textPaint: Paint
     private val fontSize = 26
+
     private var state = State.DEFAULT
     private val drawTextLines: MutableList<String>
     private var visType:Int = 0
@@ -561,7 +562,7 @@ class NormalView(ctx: Context):RelativeLayout(ctx),ViewCallback,AnkoLogger {
         visX = x
         visY = y
         visRects.forEach {
-            if (it.flagHiting){
+            if (it.flagHiting || !it.locked){
                 it.worldX = x
                 it.worldY = y
             }
@@ -573,7 +574,7 @@ class NormalView(ctx: Context):RelativeLayout(ctx),ViewCallback,AnkoLogger {
         visX += dx
         visY += dy
         visRects.forEach {
-            if (it.flagHiting){
+            if (it.flagHiting || !it.locked){
                 it.worldX += dx
                 it.worldY += dy
             }
@@ -675,8 +676,8 @@ class NormalView(ctx: Context):RelativeLayout(ctx),ViewCallback,AnkoLogger {
         var zIndex = 0
         var locked = true   //不随动
         var flagHiting = false  //点击命中，选中，只能有一个选中
-        var flagWorldMoving = false //世界坐标系可移动
-        var flagClipMoving = false //视区起点可移动
+        //var flagWorldMoving = false //世界坐标系可移动
+        //var flagClipMoving = false //视区起点可移动
         val clipRect: RectF get() = RectF(clipX, clipY, clipX + width, clipY + height)
 
         fun look(canvas: Canvas, f: (Canvas) -> Unit) {

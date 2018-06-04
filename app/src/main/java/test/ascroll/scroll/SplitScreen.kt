@@ -27,12 +27,24 @@ class DefaultSplitScreen(ctx:Context):RelativeLayout(ctx),SplitScreen,AnkoLogger
         get() = VIEW_TAG
     private var isSeup = false
     private lateinit var host:NormalView
+    //region btn
     private lateinit var btnSplit:Button
     private lateinit var btnSpringBack:Button
     private lateinit var btnOpenLine:Button
     private lateinit var btnAdd:Button
     private lateinit var btnRemove:Button
     private lateinit var btnReverse:Button
+    //endregion
+
+    //region    excute
+    val close:()->Unit = { hide() }
+    val tback:()->Unit = { host.springBack(); hideDelayed() }
+    val add:()->Unit = { host.autoAdd() }
+    val rFirst:()->Unit = { host.remove(host.visRects.first()) }
+    val rLast:()->Unit = { host.remove(host.visRects.last()) }
+    val reverse:()->Unit = { host.reverse() }
+    //endregion
+
     init {
         btnSplit = Button(ctx).apply {
             text = "关闭"
